@@ -1,0 +1,17 @@
+[Unit]
+Description=Port Forwarding UI (UPnP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# edit these two for the target machine:
+User=pi
+WorkingDirectory=/opt/portforward-ui
+ExecStart=/usr/bin/python3 /opt/portforward-ui/portforward_ui.py
+Environment=PORT=8765
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
