@@ -1,11 +1,22 @@
 # portforward-ui
 
-A tiny, dependency-free web UI to manage your router's port forwards over
-**UPnP IGD** — no router admin password required. Pure Python 3 standard
-library, runs on macOS or Linux.
+[![Python](https://img.shields.io/badge/python-3-3776ab?logo=python&logoColor=white)](https://www.python.org) [![Nix Flake](https://img.shields.io/badge/nix-flake-5277c3?logo=nixos&logoColor=white)](https://nixos.org) [![UPnP](https://img.shields.io/badge/UPnP-IGD-green)](https://en.wikipedia.org/wiki/Internet_Gateway_Device_Protocol)
 
-Handy when the router's web admin is locked down or ISP-managed (e.g. a
-carrier Hitron) but UPnP is still enabled on the LAN.
+## What is this?
+
+A tiny, dependency-free web UI to manage a router's port forwards over
+**UPnP IGD** — no router admin password required. The whole app is one
+Python-3-standard-library file in [portforward_ui.py](portforward_ui.py), and a
+Nix flake pins the runtime so it behaves the same on a laptop or a headless
+NixOS box.
+
+It exists because some routers — especially ISP-managed ones — lock their web
+admin away but leave UPnP open on the LAN. This reaches the router the way a
+game or torrent client does, and wraps it in a friendly page: list the current
+forwards, add TCP/UDP forwards, and point them at the right device. The
+**"This device"** button fills in the IP of *whoever is viewing the page*
+(detected from the request), so each person on the network forwards to their
+own machine.
 
 ## How this came to exist
 
@@ -49,50 +60,93 @@ admin page at `192.168.0.1` simply wouldn't load. The usual story would be
    **add new ones with no login at all** — exactly what the locked admin UI
    was refusing to let anyone do.
 
-This tool is that last step, wrapped in a friendly UI so it never has to be
+This tool is that last step, wrapped in a UI so it never has to be
 rediscovered from scratch.
 
-## Run
+## Getting started
 
-```bash
-python3 portforward_ui.py            # binds 0.0.0.0:8765
-python3 portforward_ui.py 9000       # custom port
-HOST=127.0.0.1 PORT=9000 python3 portforward_ui.py
+With [Nix](https://nixos.org) and flakes enabled, run it straight from the
+repo — no clone, no install:
+
+```sh
+nix run
 ```
 
-Then open the URL it prints. Anyone on the same LAN can reach
-`http://<server-ip>:8765`.
+Or enter a dev shell that provides Python (and `ip` for device discovery):
+
+```sh
+nix develop
+python3 portforward_ui.py            # binds 0.0.0.0:8765
+python3 portforward_ui.py 9000       # custom port
+```
+
+Without Nix, it is still just one stdlib file:
+
+```sh
+python3 portforward_ui.py
+```
+
+It prints a `http://127.0.0.1:8765` URL and a shareable `http://<lan-ip>:8765`
+one. Open either; anyone on the same LAN can reach the LAN URL.
+
+## Run on NixOS
+
+The flake ships a NixOS module, so the mini PC runs it as a hardened,
+auto-restarting service. Add the input and enable it:
+
+```nix
+{
+  inputs.portforward-ui.url = "github:youruser/portforward-ui";
+
+  # in your configuration.nix / host module:
+  imports = [ inputs.portforward-ui.nixosModules.default ];
+
+  services.portforward-ui = {
+    enable = true;
+    openFirewall = true;   # LAN only — never expose this to the internet
+    # port = 8765;
+    # host = "0.0.0.0";
+  };
+}
+```
+
+`nixos-rebuild switch` and it is up on boot. The service runs as a
+`DynamicUser` with `ProtectSystem=strict` and writes nothing to disk.
+
+On a non-NixOS Linux box, [portforward-ui.service](portforward-ui.service) is a
+plain systemd unit you can copy to `/etc/systemd/system/` instead.
 
 ## Features
 
 - Lists current forwards with one-click delete
-- Add TCP / UDP / both, with description
-- **"This device"** button autofills the IP of *whoever is viewing the page*
-  (detected from the request), so each person forwards to their own machine
-- Shows your public IP and highlights forwards pointing at your device
-- Auto-refreshes every 15s; dark/light aware; works on phone
+- Add TCP / UDP / both, with a description
+- **"This device"** autofills the viewer's IP, and forwards pointing at it are
+  highlighted in the table
+- Shows your public IP; auto-refreshes every 15s; dark/light aware; mobile-friendly
 
 ## How it works
 
-On start it SSDP-discovers the Internet Gateway Device, reads its
-`WANIPConnection`/`WANPPPConnection` control URL, and issues SOAP
-`AddPortMapping` / `DeletePortMapping` / `GetGenericPortMappingEntry` calls.
+[portforward_ui.py](portforward_ui.py) SSDP-discovers the Internet Gateway
+Device on startup, reads its `WANIPConnection`/`WANPPPConnection` control URL
+from the device description, and drives it with plain SOAP:
+`GetExternalIPAddress`, `GetGenericPortMappingEntry`, `AddPortMapping`,
+`DeletePortMapping`. The web layer is `http.server` from the standard library —
+no third-party dependencies at all. LAN IP is found via the default-route
+trick, and the neighbour table (`ip neigh`, falling back to `arp`) feeds the
+device-suggestion dropdown.
+
+[flake.nix](flake.nix) exposes `packages.default` (a wrapped `python3`),
+`apps.default` (for `nix run`), `devShells.default` (for `nix develop`), and
+`nixosModules.default` (the service above).
 
 ## Security
 
-- The UI has **no authentication** and exposes port-forward control to anyone
-  who can reach it. Keep it **LAN-only** — never forward its own port to the
-  internet.
-- UPnP must be enabled on the router. If `add` is rejected for a *different*
-  device's IP, open the page *from that device* (some UPnP stacks only allow a
-  host to forward to itself).
+- The UI has **no authentication** and hands port-forward control to anyone who
+  can reach it. Keep it **LAN-only** — never forward its own port outward.
+- UPnP must be enabled on the router. If an `add` is rejected for a *different*
+  device's IP, open the page *from that device* (some UPnP stacks only let a
+  host forward to itself).
 
-## Run as a service (Linux)
+## Licence
 
-See `portforward-ui.service`. Edit `User=` and the path, then:
-
-```bash
-sudo cp portforward-ui.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now portforward-ui
-```
+MIT — do what you like.

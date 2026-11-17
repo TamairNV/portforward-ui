@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 *.log
 .DS_Store
+
+# Nix
+result
+result-*
+.direnv/
